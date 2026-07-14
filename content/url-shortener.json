@@ -1,0 +1,42 @@
+{
+  "id": "url-shortener",
+  "name": "URL Shortener",
+  "difficulty": "medium",
+  "mermaid_diagram": "graph TD\n    Client([\"Client Browser\"]) -->|\"HTTP Request\"| DNS[\"DNS Resolution\"]\n    DNS -->|\"Resolved IP\"| LB[\"Load Balancer\"]\n    LB -->|\"Round Robin\"| AS1[\"App Server 1\"]\n    LB -->|\"Round Robin\"| AS2[\"App Server 2\"]\n    LB -->|\"Round Robin\"| AS3[\"App Server 3\"]\n    AS1 & AS2 & AS3 -->|\"Check Cache\"| Redis[(\"Redis Cache\")]\n    AS1 & AS2 & AS3 -->|\"Read / Write\"| Cass[(\"Cassandra Cluster\")]\n    AS1 & AS2 & AS3 -->|\"Request Unique ID\"| IDGen[\"ID Generation Service\"]\n    IDGen -->|\"Counter Range Lease\"| ZK[(\"ZooKeeper\")]\n    AS1 & AS2 & AS3 -->|\"Emit Redirect Event\"| Queue[\"Analytics Queue\"]\n    Queue -->|\"Async Processing\"| Analytics[\"Analytics Service\"]",
+  "tradeoffs": [
+    {
+      "option_a": "SQL Database (PostgreSQL)",
+      "option_b": "NoSQL Database (Cassandra)",
+      "chosen": "NoSQL Database (Cassandra)",
+      "reason": "A URL shortener's primary access pattern is a simple key-value lookup: given a short code, return the long URL. Cassandra excels at this pattern because it is optimized for high-throughput writes and fast reads by partition key, and it scales horizontally by adding nodes without complex resharding. The trade-off is that Cassandra offers only eventual consistency and has no support for ad-hoc joins or multi-row transactions, so operations like listing all URLs for a given user require a separate denormalized table. This is acceptable because the core redirect path never needs those relational features, and the write volume at scale (millions of new URLs per day) would strain a single-primary SQL topology."
+    },
+    {
+      "option_a": "MD5 Hash Truncation",
+      "option_b": "Base62 Counter Encoding",
+      "chosen": "Base62 Counter Encoding",
+      "reason": "Truncating an MD5 hash to 7 characters introduces a collision probability that grows with the dataset: at roughly 3.5 trillion possible 7-character hex strings, collisions become statistically likely well before a billion URLs, forcing expensive check-and-retry loops on every write. Base62 encoding of a monotonically increasing counter guarantees zero collisions by construction and produces a predictable, compact output (62^7 supports over 3.5 trillion unique codes). The cost is a coordination dependency: each application server must lease a counter range from ZooKeeper to avoid duplicates, adding an operational component that must be monitored for liveness. This trade-off is worthwhile because it eliminates collision handling entirely and keeps write latency deterministic."
+    },
+    {
+      "option_a": "Cache-Aside (Lazy Loading)",
+      "option_b": "Write-Through Cache",
+      "chosen": "Cache-Aside (Lazy Loading)",
+      "reason": "In a URL shortener, reads outnumber writes by at least 100:1 because a single short URL may be clicked thousands of times but is created only once. Cache-aside loads a mapping into Redis only on the first cache miss, which naturally populates the cache with the hottest URLs without wasting memory on rarely-accessed entries. Write-through would push every newly created URL into Redis immediately, but most short URLs receive the majority of their clicks in the first few hours; a cache-aside miss on the first redirect adds only one Cassandra read before all subsequent redirects are served from cache. The downside is a brief cold-start penalty after cache evictions or restarts, which is mitigated by setting a TTL long enough to cover peak access windows."
+    },
+    {
+      "option_a": "301 Permanent Redirect",
+      "option_b": "302 Temporary Redirect",
+      "chosen": "302 Temporary Redirect",
+      "reason": "A 301 tells the browser to cache the redirect permanently, meaning subsequent clicks bypass the server entirely and go straight to the destination. This is faster for the end user but makes the short URL invisible to the service: click analytics stop counting, the original URL cannot be changed or expired, and A/B testing or geo-routing become impossible. A 302 forces every click to pass through the application servers, which adds a few milliseconds of latency per redirect but gives the service full control over every request. For a product that tracks click analytics, supports link expiration, or may need to update destinations, the operational flexibility of 302 far outweighs the marginal latency cost."
+    }
+  ],
+  "interview_questions": [
+    "Your ID generation service leases counter ranges from ZooKeeper. What happens if an application server crashes mid-range — do you lose those IDs, and does that matter at scale?",
+    "At 100 million redirects per day, which component becomes the bottleneck first, and what specific scaling strategy would you apply to it?",
+    "A user creates 10 short URLs all pointing to the same long URL. Should the system return the same short code or a different one each time? What are the implications of each choice for analytics and caching?",
+    "You chose Cassandra for its write throughput, but a new requirement asks for a 'most popular URLs today' leaderboard. How would you implement this without adding a relational database, and what consistency trade-offs does your approach introduce?",
+    "Your Redis cache goes down during peak traffic. Describe what happens to your redirect latency and Cassandra read load, and explain the specific steps you would take to recover gracefully without a cascading failure.",
+    "An attacker generates millions of unique short URLs pointing to a phishing site. How would you detect and mitigate this abuse without adding noticeable latency to the creation path for legitimate users?",
+    "If you switched from Base62 counter encoding to a hash-based scheme to eliminate the ZooKeeper dependency, how would you handle collisions at 10 billion stored URLs, and what would the write latency impact be?",
+    "Your system uses eventual consistency in Cassandra. A user creates a short URL and immediately shares it. Under what conditions could the first click return a 404, and how would you mitigate this without switching to strong consistency?"
+  ]
+}
