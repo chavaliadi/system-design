@@ -1,0 +1,36 @@
+{
+  "id": "distributed-cache",
+  "name": "Distributed Cache",
+  "difficulty": "hard",
+  "mermaid_diagram": "graph TD\n    Client([\"Client\"]) -->|\"Request\"| AS[\"App Server Client\"]\n    AS -->|\"1. Hash Key to Ring Node\"| CH[\"Consistent Hashing Module\"]\n    CH -->|\"2. Node IP Address\"| AS\n    AS -->|\"3. Read / Write (Direct Connection)\"| CN1[\"Cache Node 1\"]\n    AS -->|\"3. Read / Write (Direct Connection)\"| CN2[\"Cache Node 2\"]\n    AS -->|\"3. Read / Write (Direct Connection)\"| CN3[\"Cache Node 3\"]\n    CN1 & CN2 & CN3 -->|\"Write-Through / Cache Miss Load\"| DB[(\"Distributed Database\")]\n    Coordinator[\"Cluster Manager - ZooKeeper\"] -->|\"Heartbeats / Health Checks\"| CN1 & CN2 & CN3\n    Coordinator -->|\"Broadcast Topology Changes\"| AS\n    CN1 & CN2 & CN3 -->|\"Replicate Key\"| BackupCN[\"Replicated Peer Node\"]",
+  "tradeoffs": [
+    {
+      "option_a": "LRU (Least Recently Used) Eviction",
+      "option_b": "LFU (Least Frequently Used) Eviction",
+      "chosen": "LRU (Least Recently Used) Eviction",
+      "reason": "LRU evicts items that haven't been accessed for the longest time, which matches web application workloads exhibiting strong temporal locality (e.g., active user sessions or current news). LFU tracks absolute hit counts to evict low-frequency items, which optimizes static catalog access but suffers from 'cache pollution' where historic traffic spikes (e.g., a viral post that is no longer active) keep stale items cached indefinitely. Implementing LRU in O(1) time requires a doubly-linked list and a hash map, whereas LFU requires complex decay algorithms to prevent pollution, which adds runtime and memory overhead (e.g., an extra 4 bytes per item for frequency tracking, costing 400 MB of metadata for 100 million items). The cost of LRU is its vulnerability to sequential scans of cold data that flush the cache, which is mitigated in production by using a segmented LRU (SLRU) policy."
+    },
+    {
+      "option_a": "Write-Through Caching",
+      "option_b": "Write-Behind (Write-Back) Caching",
+      "chosen": "Write-Through Caching",
+      "reason": "Write-through updates the database and cache synchronously in a single transaction, guaranteeing strong consistency so that subsequent reads immediately return the updated state. Write-behind writes to the cache and returns success immediately, updating the database asynchronously, which reduces write latency from the database's 5–15ms down to the cache's sub-millisecond range. However, write-behind risks permanent data loss if a cache node crashes before its queued updates are flushed. Write-through is chosen for workloads (such as user profiles or authorization permissions) where consistency is critical and database writes are low-frequency, meaning the database latency penalty on write is an acceptable cost for absolute data durability."
+    },
+    {
+      "option_a": "Modulo Hash Routing (Client-Side)",
+      "option_b": "Consistent Hashing with Virtual Nodes",
+      "chosen": "Consistent Hashing with Virtual Nodes",
+      "reason": "Using simple modulo hashing (key % N) to route requests to N cache servers is highly efficient but fails when the cluster resizes: removing one node changes the divisor to N-1, causing roughly N/(N+1) (e.g., 90% in a 10-node cluster) of all keys to rehash to different nodes. This triggers a catastrophic database read storm. Consistent hashing maps keys and servers to a 360-degree ring, meaning a node removal only rehashes 1/N (10%) of keys. Using 100–200 virtual nodes per physical node distributes the keys evenly (keeping standard deviation of key load under 5%), preventing hotspots. The trade-off is client-side configuration complexity, as client routing tables must synchronize with a cluster coordinator (like ZooKeeper) when node topology changes."
+    }
+  ],
+  "interview_questions": [
+    "You are scaling a distributed cache from 10 to 20 nodes using consistent hashing. A peer node goes down before the client-side hash ring is updated. Describe how you handle the request routing during this propagation delay and how you prevent write conflicts or duplicate cache entries.",
+    "Under what specific workload patterns does a standard LRU eviction policy perform worse than LFU, and how would you implement a Segmented LRU (SLRU) to protect the cache from being completely cleared by a batch database migration or database dump?",
+    "A single key (e.g., a flash sale item) receives 100,000 read requests per second, overloading the specific cache node responsible for that partition. Describe three distinct ways to handle this hot key problem without resizing the entire cluster, and detail the consistency trade-offs of each.",
+    "Explain the mechanics of a 'cache stampede' (thundering herd) when a hot key expires. If 5,000 application servers concurrently detect a cache miss and query the primary database, calculate the latency impact on the database, and show how to use mutual exclusion (mutexes) or x-fetch to prevent it.",
+    "Your distributed cache uses a write-behind (write-back) policy. The cache node experiences a hardware failure while holding 10,000 dirty writes that have not yet been written to the database. How do you recover or reconcile this data, and what architecture changes would you make to guarantee zero data loss?",
+    "You are designing a distributed cache that must support multi-region replication (US-East and EU-West). If a key is updated in US-East, describe the cache invalidation flow to EU-West, and explain how you handle network partitions (split-brain) between regions without violating CAP theorem constraints.",
+    "Compare the memory overhead, lock contention, and lookup latency of storing objects in a centralized cache (like Redis) as a serialized JSON string versus individual hash fields. At 50 million objects, what is the memory difference, and when is each appropriate?",
+    "Explain how you would design a distributed cache's health check and automatic recovery system using ZooKeeper. If a node briefly disconnects due to a 2-second GC pause, how do you prevent the system from prematurely rehashing the ring and causing unnecessary database load?"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "id": "news-feed",
+  "name": "News Feed",
+  "difficulty": "medium",
+  "mermaid_diagram": "graph TD\n    Client([\"Client Browser\"]) -->|\"Get Feed / Post\"| Gateway[\"API Gateway\"]\n    Gateway -->|\"Route Feed Request\"| NFS[\"News Feed Service\"]\n    Gateway -->|\"Route Post Request\"| PS[\"Post Service\"]\n    PS -->|\"Write Post Details\"| PostDB[(\"Post Database - Cassandra\")]\n    PS -->|\"Publish Event\"| FanoutQueue[\"Fan-out Queue - Kafka\"]\n    FanoutQueue -->|\"Process Job\"| FeedSvc[\"Feed Generation Service\"]\n    FeedSvc -->|\"Read Followers\"| SocialGraph[(\"Social Graph DB - Neo4j\")]\n    FeedSvc -->|\"Push Post ID\"| FeedCache[(\"Feed Cache - Redis\")]\n    NFS -->|\"Read Precomputed Feed (Post IDs)\"| FeedCache\n    NFS -->|\"Lookup Followed Celebrities\"| FollowCache[(\"Follow Cache - Redis\")]\n    NFS -->|\"Fetch Celebrity Posts\"| PostDB\n    NFS -->|\"Hydrate Post Content\"| PostCache[(\"Post Cache - Redis\")]\n    PostCache -->|\"Cache Miss Hydrate\"| PostDB",
+  "tradeoffs": [
+    {
+      "option_a": "Push Model (Fan-Out on Write)",
+      "option_b": "Hybrid Push/Pull Model",
+      "chosen": "Hybrid Push/Pull Model",
+      "reason": "The push model works well for standard users but breaks under the 'celebrity problem': if a celebrity with 50 million followers posts, fan-out on write requires 50 million database updates. At a pipeline capacity of 10,000 writes per second, this single post would block the queue for 5,000 seconds (roughly 83 minutes), delaying feeds globally. The hybrid model solves this by routing posts from standard users (e.g., under 25,000 followers) via push to keep read times under 100ms, while posts from celebrities bypass the fan-out queue entirely and are pulled dynamically from the celebrity's timeline at read time. The cost is a slight read-time merge overhead, requiring application servers to run parallel metadata queries for celebrity followings, which is a favorable trade-off to ensure real-time delivery."
+    },
+    {
+      "option_a": "Read-Time Machine Learning Ranking",
+      "option_b": "Write-Time Sorting with Read-Time Filtering",
+      "chosen": "Write-Time Sorting with Read-Time Filtering",
+      "reason": "Ranking a user's feed using a deep machine learning model at read time requires scoring thousands of candidate posts dynamically based on real-time signals, which can take 1ms per post. For a user with 2,000 potential posts in their feed, a full read-time ranking computation would consume 2 seconds of application CPU time, creating an unacceptable latency bottleneck. Sorting chronologically at write time into Redis lists allows O(1) feed retrieval, but lacks personalization. The chosen approach pre-sorts a candidate pool of the top 200 chronological posts at write time, and applies a lightweight scoring heuristic or fast ML model at read time over only these 200 candidates, bounding execution latency to under 50ms while maintaining high engagement."
+    },
+    {
+      "option_a": "Caching Full Post Objects in Feed Cache",
+      "option_b": "Caching Post IDs Only in Feed Cache",
+      "chosen": "Caching Post IDs Only in Feed Cache",
+      "reason": "Caching full 1 KB post objects directly inside each user's feed list in Redis consumes massive memory at scale: caching 500 posts for 100 million active users requires 50 billion objects, which at 1 KB each equals 50 TB of raw payload (over 100 TB when accounting for Redis data structure overhead). Storing only 64-bit post IDs (8 bytes) reduces the raw payload for 50 billion items to 400 GB (roughly 800 GB including Redis List/Sorted Set allocation overhead), making it feasible to host the entire active user feed index in a single cost-effective cluster. The trade-off is that application servers must execute a secondary hydration step to fetch full post content, which is mitigated by placing a high-hit-rate read cache (Redis key-value) in front of the primary document/column store."
+    }
+  ],
+  "interview_questions": [
+    "A user follows 10,000 other users, and 50 of them are highly active celebrities. Explain the step-by-step query execution path when this user requests their news feed, specifically detailing how you merge the precomputed and on-demand components.",
+    "Your feed generation service's write-path queue gets backed up by a sudden spike in posting activity (e.g., during a major live event). Standard users experience a 10-minute delay in seeing posts from friends, but celebrity pull-based posts load instantly. How do you design your queuing system to prioritize standard user fan-out without degrading overall system stability?",
+    "A user deletes a post that they published 10 minutes ago. Since you use a hybrid push/pull model, describe how this delete event propagates through the feed cache (Redis) and the primary post store (Cassandra). How do you handle clients who have already cached the post ID in their local feed views?",
+    "Your engagement-based feed ranking model requires historical user behavior data (e.g., how often user A clicks on user B's posts). Describe a scalable schema and write/read path for tracking this user-to-user affinity score without bottlenecking the main database or the feed loading path.",
+    "If a user has been inactive for 30 days, their precomputed feed cache in Redis has expired due to a 7-day TTL policy. When this user suddenly logs back in, describe the 'cold start' feed generation process. How do you prevent this rebuild query from degrading performance for active users?",
+    "A malicious actor creates bot accounts that follow 50,000 users each and post 100 times per minute to flood the feed caches. What architectural safety bounds, rate limits, or size limits on the precomputed Redis list keys would you enforce to prevent memory exhaustion in the Redis cluster?",
+    "Your system uses a weighted sliding timeline for feed pagination (fetching 20 posts at a time). If a user scrolls their feed, clicks on a post, returns, and scrolls again while new posts are constantly being fanned out, how do you prevent duplicate posts or missed posts across page boundaries?",
+    "Explain how you would implement a 'hide this post' or 'mute this user' feature in a hybrid news feed architecture. Where is this filtering applied (write-time in Redis vs read-time in the application server), and what are the performance and latency implications of your choice?"
+  ]
+}
