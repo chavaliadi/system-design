@@ -1,0 +1,48 @@
+{
+  "id": "chat-application",
+  "name": "Chat Application",
+  "difficulty": "hard",
+  "mermaid_diagram": "graph TD\n    ClientA([\"Client A\"]) -->|\"WebSocket\"| WSS1[\"WebSocket Server 1\"]\n    ClientB([\"Client B\"]) -->|\"WebSocket\"| WSS2[\"WebSocket Server 2\"]\n    ClientC([\"Client C\"]) -->|\"WebSocket\"| WSS1\n    WSS1 & WSS2 -->|\"Lookup Connection\"| ConnRegistry[(\"Connection Registry - Redis\")]\n    WSS1 & WSS2 -->|\"Pub / Sub\"| MQ[\"Message Broker - Kafka\"]\n    MQ -->|\"Fan-Out\"| WSS1\n    MQ -->|\"Fan-Out\"| WSS2\n    WSS1 & WSS2 -->|\"Persist Message\"| MsgDB[(\"Message Store - Cassandra\")]\n    WSS1 & WSS2 -->|\"Update Status\"| PresenceDB[(\"Presence Store - Redis\")]\n    WSS1 & WSS2 -->|\"Push Notification\"| PushSvc[\"Push Notification Service\"]\n    PushSvc -->|\"APNS / FCM\"| OfflineClient([\"Offline Client\"])\n    WSS1 & WSS2 -->|\"Fetch History\"| MsgDB\n    MQ -->|\"Async Indexing\"| SearchSvc[\"Search Index Service\"]",
+  "tradeoffs": [
+    {
+      "option_a": "HTTP Long Polling",
+      "option_b": "WebSocket Connections",
+      "chosen": "WebSocket Connections",
+      "reason": "HTTP long polling opens a new TCP connection for every poll cycle: the client sends a request, the server holds it until a message arrives or a timeout (typically 30 seconds) expires, then the client immediately reconnects. At 10 million connected users, this produces millions of TCP handshakes per minute and doubles the per-message latency because the response must complete a full HTTP round-trip before the next poll begins. WebSockets upgrade a single HTTP connection to a persistent, full-duplex TCP channel, eliminating reconnection overhead entirely and enabling sub-50ms server-to-client push. The cost is connection statefulness: each WebSocket server must track which connections it owns, and a server crash drops all its connections, requiring clients to reconnect and re-register. This is manageable with a connection registry in Redis and client-side automatic reconnection logic."
+    },
+    {
+      "option_a": "Fan-Out on Write",
+      "option_b": "Fan-Out on Read",
+      "chosen": "Fan-Out on Write",
+      "reason": "In fan-out on write, when a user sends a message, the system immediately pushes it into the inbox of every recipient. For 1:1 chat, this means exactly one write to one inbox — trivially cheap. For a group chat of 50 members, the system writes the message to 50 inboxes at send time, which adds write amplification but means every recipient's read path is a simple sequential scan of their own inbox with zero joins or fan-out at read time. Fan-out on read stores the message once and requires each recipient to query all conversations they belong to when they open the app, which at 100 active conversations per user produces 100 queries per app open. The trade-off reverses for very large groups (10,000+ members, like broadcast channels), where fan-out on write becomes prohibitively expensive and fan-out on read with pagination is preferable. For a chat application where the vast majority of conversations are 1:1 or small groups under 100 members, fan-out on write optimizes the dominant read path at an acceptable write cost."
+    },
+    {
+      "option_a": "Relational Database (PostgreSQL)",
+      "option_b": "Wide-Column Store (Cassandra)",
+      "chosen": "Wide-Column Store (Cassandra)",
+      "reason": "Chat message access is almost exclusively sequential: users scroll through messages in a single conversation in reverse chronological order. Cassandra models this perfectly with a partition key of conversation_id and a clustering key of message_timestamp, making a page of 50 messages a single partition scan with no index lookups. At WhatsApp-scale (100 billion messages per day), Cassandra's append-only LSM-tree storage handles write throughput that would overwhelm a B-tree-based PostgreSQL instance, and horizontal scaling is achieved by adding nodes rather than complex sharding logic. The cost is no cross-partition queries: searching messages across all conversations requires a separate search index (Elasticsearch), and complex aggregations like 'unread count across all chats' need a denormalized counter table. This is acceptable because the dominant access pattern — read a page of messages in one chat — fits Cassandra's model exactly."
+    },
+    {
+      "option_a": "Application-Level Message Ordering",
+      "option_b": "Kafka Partition-Based Ordering",
+      "chosen": "Kafka Partition-Based Ordering",
+      "reason": "If each WebSocket server independently assigns timestamps and writes to the message store, two messages sent near-simultaneously from different servers can arrive out of order due to clock skew (even with NTP, skew of 10–50ms is common between servers). Kafka guarantees strict ordering within a partition: by routing all messages for a given conversation to the same partition (using conversation_id as the partition key), the system gets a total order for every conversation without any custom ordering logic. The cost is partition-level throughput limits — a single Kafka partition handles roughly 10,000–50,000 messages per second depending on message size, which is sufficient for any single conversation but means the total topic must be spread across enough partitions to handle aggregate throughput. For a chat system where no single conversation approaches even 1,000 messages per second, this limit is never practically hit."
+    },
+    {
+      "option_a": "Store-and-Forward for Offline Delivery",
+      "option_b": "Recipient Pulls Missed Messages on Reconnect",
+      "chosen": "Store-and-Forward for Offline Delivery",
+      "reason": "When a recipient is offline, the system must decide whether to eagerly push messages into a per-user persistent queue (store-and-forward) or let the recipient query for all missed messages when they reconnect (pull-on-reconnect). Pull-on-reconnect requires the recipient to know the timestamp or sequence number of their last-seen message in every conversation, then issue a range query per conversation — at 100 active conversations, that is 100 queries on reconnect, adding seconds of load time and a spike of read traffic. Store-and-forward writes each message to both the conversation timeline and a per-user pending queue; on reconnect the client drains a single queue in one sequential read, regardless of how many conversations had activity. The cost is write amplification (every message to an offline user is written twice), but this is bounded by the offline user count and is a favorable trade-off for instant delivery on reconnect."
+    }
+  ],
+  "interview_questions": [
+    "Your chat system has 5 million concurrent WebSocket connections spread across 200 servers. A WebSocket server crashes, dropping 25,000 connections. Describe exactly what happens: how do clients detect the failure, how do they reconnect, and how does the system ensure no messages are lost during the reconnection window?",
+    "Two users in a 1:1 conversation both send a message at the exact same millisecond from different WebSocket servers. When both users view the conversation, they must see the same message order. How does your system guarantee this, and what happens if the ordering mechanism itself has a brief outage?",
+    "You chose fan-out on write for group messages. A celebrity user creates a group with 500,000 members and sends a message. Walk through the write path: how many writes does this produce, how long does it take, and at what group size would you switch strategies?",
+    "A user has been offline for 3 days. During that time, they received 2,000 messages across 80 conversations. Describe the exact reconnection flow: what data does the client send, what does the server query, and how do you avoid a thundering herd when millions of users reconnect simultaneously after a widespread network outage?",
+    "Your message store uses Cassandra with conversation_id as the partition key. A popular group chat has been active for 2 years and its partition has grown to 500 MB. What performance problems does this cause, and how would you redesign the partition key to prevent unbounded partition growth without breaking message ordering?",
+    "A product manager asks you to add read receipts ('seen by Alice at 3:42 PM') for group chats. For a 50-person group, every message generates up to 50 read receipt events. How would you store and deliver these without overwhelming the message store or the WebSocket servers?",
+    "Your system guarantees exactly-once delivery using client-side deduplication with message IDs. A client sends a message, the server persists it, but the acknowledgment is lost due to a network blip. The client retries. How does your system prevent the duplicate from appearing in the conversation, and where does the deduplication check happen?",
+    "You need to support message search ('find all messages containing refund in this conversation'). Your primary store is Cassandra, which does not support full-text search. Describe your indexing strategy, how you keep the search index consistent with the primary store, and what happens when the indexing pipeline falls behind."
+  ]
+}

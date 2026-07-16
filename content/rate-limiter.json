@@ -1,0 +1,42 @@
+{
+  "id": "rate-limiter",
+  "name": "Rate Limiter",
+  "difficulty": "medium",
+  "mermaid_diagram": "graph TD\n    Client([\"Client\"]) -->|\"API Request\"| Gateway[\"API Gateway\"]\n    Gateway -->|\"Extract Client ID\"| RLS[\"Rate Limit Service\"]\n    RLS -->|\"Check / Increment Counter\"| Redis[(\"Redis Cluster\")]\n    Redis -->|\"Allow / Deny\"| RLS\n    RLS -->|\"429 Too Many Requests\"| Client\n    RLS -->|\"Forward Allowed Request\"| LB[\"Load Balancer\"]\n    LB -->|\"Route\"| AS1[\"App Server 1\"]\n    LB -->|\"Route\"| AS2[\"App Server 2\"]\n    AS1 & AS2 -->|\"Read / Write\"| DB[(\"Primary Database\")]\n    Gateway -->|\"Emit Rate Event\"| Queue[\"Metrics Queue\"]\n    Queue -->|\"Async Aggregation\"| Metrics[\"Monitoring Dashboard\"]\n    RLS -->|\"Load Rules\"| RulesDB[(\"Rules Config Store\")]",
+  "tradeoffs": [
+    {
+      "option_a": "Token Bucket",
+      "option_b": "Sliding Window Counter",
+      "chosen": "Token Bucket",
+      "reason": "A token bucket refills at a fixed rate (e.g., 10 tokens per second) and allows short bursts up to the bucket capacity, which matches real API traffic where legitimate clients send requests in clusters rather than at perfectly uniform intervals. A sliding window counter smooths the boundary-burst problem of fixed windows but still enforces a hard per-window cap that rejects bursty-but-legitimate traffic. The token bucket's cost is slightly more state per client — a token count plus a last-refill timestamp versus a single counter — but this is negligible in Redis where each key is under 100 bytes. For APIs that need to tolerate natural traffic spikes while enforcing a sustained average rate, the token bucket provides better user experience without sacrificing protection."
+    },
+    {
+      "option_a": "Local In-Memory Rate Limiting",
+      "option_b": "Centralized Redis Rate Limiting",
+      "chosen": "Centralized Redis Rate Limiting",
+      "reason": "Local in-memory rate limiting tracks counters independently on each application server, so a client sending 100 requests per second across 10 servers sees an effective limit of 10× the intended cap — the servers have no shared view. Centralized Redis gives every server a single authoritative counter per client, enforcing a true global limit. The cost is a network round-trip to Redis on every request (typically 0.5–1ms on a local-region cluster), which adds latency to the critical path. This is acceptable because rate limiting is a safety mechanism that must be globally accurate; a locally-enforced limit that can be trivially bypassed by distributing requests across servers provides no meaningful protection against abuse."
+    },
+    {
+      "option_a": "Fixed Window Counter",
+      "option_b": "Sliding Window Log",
+      "chosen": "Fixed Window Counter",
+      "reason": "A sliding window log stores the timestamp of every individual request and counts entries within the trailing window, giving perfect accuracy but consuming O(n) memory per client where n is the request count within the window. At 1,000 requests per minute per client across 1 million clients, the log stores 1 billion timestamps — roughly 8 GB of raw data in Redis, not counting key overhead. A fixed window counter stores a single integer per client per window, consuming under 50 bytes per key. The trade-off is the boundary-burst problem: a client can send the full allowance at the end of one window and the start of the next, briefly doubling their effective rate. This is mitigated by combining the current and previous window counts with a weighted average, producing a sliding window counter that uses O(1) memory while approximating sliding-window accuracy within a 1–2% error margin."
+    },
+    {
+      "option_a": "Fail-Open When Redis Is Down",
+      "option_b": "Fail-Closed When Redis Is Down",
+      "chosen": "Fail-Open When Redis Is Down",
+      "reason": "If the rate-limiting Redis cluster becomes unreachable and the system fails closed, every API request is rejected with 429, causing a complete service outage for all users — the rate limiter designed to protect the system becomes the single point of failure that destroys it. Failing open allows all requests through during the Redis outage, temporarily removing rate limits but keeping the service available. The risk is that an attacker could exploit the window to send unbounded traffic, but this is mitigated by local in-memory fallback counters on each server that enforce a coarse per-server cap until Redis recovers. The outage window is typically seconds to low minutes for a replicated Redis cluster, making the exposure brief and bounded."
+    }
+  ],
+  "interview_questions": [
+    "Two requests from the same client arrive simultaneously at two different application servers, and the client has exactly one token remaining. Both servers query Redis concurrently. How do you prevent both requests from being allowed, and what Redis primitive would you use?",
+    "Your rate limiter uses a fixed window counter with a 60-second window. A client sends 0 requests in the first 59 seconds, then 100 requests at second 59, and another 100 requests at second 61 — crossing the window boundary. How many of those 200 requests are allowed, and how would a sliding window counter change the outcome?",
+    "You need to rate-limit 50 million unique API keys. Each key is allowed 100 requests per minute. Estimate the total Redis memory required if you use a sliding window log versus a fixed window counter, and explain which approach is feasible at this scale.",
+    "A microservice architecture has 200 backend services, each calling each other internally. Should internal service-to-service calls be rate-limited, and if so, should they share the same Redis cluster as external client rate limits or use a separate mechanism?",
+    "Your Redis rate-limit cluster goes down for 30 seconds during peak traffic. You chose fail-open. Describe the specific blast radius: what happens to your backend services, databases, and downstream dependencies during those 30 seconds, and how do you recover once Redis comes back?",
+    "A customer complains that their rate limit of 1,000 requests per minute is being enforced too aggressively — they are getting 429 responses at only 950 requests. What clock skew, network latency, or counting artifacts could explain this, and how would you debug it?",
+    "You are asked to add per-endpoint rate limits (e.g., /api/search gets 10 req/s, /api/upload gets 2 req/s) on top of the existing per-client global limit. How does this change your Redis key design, and what happens when a request is within its endpoint limit but exceeds the global limit?",
+    "Your system uses a token bucket algorithm. A client has been idle for 24 hours and their bucket is full. They suddenly send a burst of 500 requests in 1 second. Should the system allow all 500? What are the arguments for and against capping the maximum burst size below the bucket capacity?"
+  ]
+}
