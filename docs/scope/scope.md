@@ -11,7 +11,7 @@ An adaptive learning platform for practicing system design interviews. Users stu
 | # | Feature | Phase | Status | Critical Path? | Dependencies |
 |---|---------|-------|--------|----------------|--------------|
 | 1 | Topic JSON Content | Foundation | done | Yes | None |
-| 2 | Next.js & UI Scaffold | Foundation | planned | Yes | None |
+| 2 | Next.js & UI Scaffold | Foundation | in-progress | Yes | None |
 | 3 | Coding standards & tooling | Foundation | planned | No | 2 |
 | 4 | Data model | Foundation | planned | Yes | 2 |
 | 5 | Topic browser & detail views | Skeleton | planned | Yes | 1, 2, 4 |
@@ -33,7 +33,7 @@ Create and validate the JSON files for the 8 system design topics, including Mer
 ### 2. Next.js & UI Scaffold
 Scaffold the Next.js 15 App Router codebase with Tailwind CSS, shadcn/ui, and absolute import layouts.
 **Done when:** A blank project boots locally, is free of compile errors, and includes base configurations.
-- [ ] Scaffold the project: `/develop nextjs-scaffold`
+- [x] Scaffold the project: `/develop nextjs-scaffold`
 
 ### 3. Coding standards & tooling
 Configure ESLint, Prettier, TypeScript strict mode, and pre-commit checks.

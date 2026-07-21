@@ -1,14 +1,13 @@
 # Dependencies
 node_modules/
-frontend/node_modules/
-backend/node_modules/
+/.pnp
+.pnp.js
 
 # Next.js build output
-.next/
-frontend/.next/
-out/
-build/
-dist/
+/.next/
+/out/
+/build/
+/dist/
 
 # Misc
 .DS_Store
@@ -24,13 +23,9 @@ yarn-error.log*
 .env*.local
 .env
 !.env.example
-frontend/.env*.local
-frontend/.env
-!frontend/.env.example
 
 # Vercel deployment
 .vercel
-frontend/.vercel
 
 # IDEs & Editors
 .idea/
