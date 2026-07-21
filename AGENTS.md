@@ -9,7 +9,7 @@
 
 ## Build approach
 
-<TBD, set by /scope>
+Skateboard (ship the thinnest usable whole first, then grow it).
 
 ## Commands
 

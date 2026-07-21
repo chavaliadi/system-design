@@ -1,0 +1,42 @@
+{
+  "id": "video-streaming",
+  "name": "Video Streaming",
+  "difficulty": "hard",
+  "mermaid_diagram": "graph TD\n    Creator([\"Content Creator / Uploader\"]) -->|\"1. Upload Raw Master Video\"| IngestSvc[\"Ingestion Service\"]\n    IngestSvc -->|\"2. Save Raw File\"| RawStorage[(\"Raw Video Store - S3 Hot\")]\n    IngestSvc -->|\"3. Trigger Transcode Job\"| TranscodeQueue[\"Transcoding Queue - Kafka\"]\n    TranscodeQueue -->|\"4. Chunk & Process Rungs\"| TranscodeWorkers[\"Transcoder Worker Pool\"]\n    TranscodeWorkers -->|\"5. Write ABR Chunks & Manifests\"| ABRStorage[(\"Processed ABR Store - S3\")]\n    TranscodeWorkers -->|\"6. Index Video Metadata\"| CatalogDB[(\"Video Catalog DB - Cassandra\")]\n    Client([\"Viewer Client App\"]) -->|\"7. Request Manifest (m3u8)\"| EdgeCDN[\"Regional CDN Edge Nodes\"]\n    EdgeCDN -->|\"8. Cache Miss Fetch\"| OriginShield[\"Origin Shield Proxy\"]\n    OriginShield -->|\"9. Fetch ABR Chunk\"| ABRStorage\n    Client -->|\"10. Adaptive Chunk Downloads (fMP4)\"| EdgeCDN\n    CatalogDB -->|\"11. Sync View Metrics\"| Analytics[\"View Analytics Service\"]\n    ABRStorage -->|\"12. Archive Cold Videos (>30 days idle)\"| ColdStorage[(\"Cold Archive Store - S3 Glacier\")]",
+  "tradeoffs": [
+    {
+      "option_a": "On-Demand Video Transcoding",
+      "option_b": "Pre-Generated ABR Transcoding Ladder",
+      "chosen": "Pre-Generated ABR Transcoding Ladder",
+      "reason": "On-demand transcoding generates video renditions dynamically when requested by a client, which eliminates pre-computed storage costs but requires massive real-time GPU compute clusters that introduce 5–15 seconds of startup latency per video stream. Pre-generating a standard 5-rung ABR ladder (1080p @ 6 Mbps, 720p @ 3 Mbps, 480p @ 1.5 Mbps, 360p @ 0.8 Mbps, 240p @ 0.4 Mbps; total combined bitrate 11.7 Mbps) increases raw storage footprint by 1.95x over the 6 Mbps master file (converting a 5.4 GB 1080p master for a 2-hour video into 10.53 GB across all rungs, calculated at 11.7 Mbps / 8 bits/byte * 7,200s). Pre-generating all rungs allows CDN edge nodes to serve pre-packaged chunks instantly with sub-500ms time-to-first-frame (TTFF), making the storage cost trade-off essential for high-quality playback."
+    },
+    {
+      "option_a": "2-Second Video Segments",
+      "option_b": "6-Second Video Segments",
+      "chosen": "6-Second Video Segments",
+      "reason": "Short 2-second video segments allow client ABR algorithms to adapt to sudden bandwidth drops within 2 seconds, minimizing video rebuffering during network fluctuations. However, 2-second segments triple the number of HTTP GET requests per hour (1,800 requests vs 600 requests for 6-second segments) and reduce video compression efficiency by requiring 3x more IDR keyframes, increasing overall file size by 8–12%. 6-second segments optimize video compression density and reduce CDN manifest request overhead by 66%, accepting a slightly slower 6-second quality adaptation window in exchange for lower CDN egress bandwidth and higher overall video quality per bit."
+    },
+    {
+      "option_a": "MPEG-DASH Open Standard",
+      "option_b": "HLS (HTTP Live Streaming) with CMAF",
+      "chosen": "HLS (HTTP Live Streaming) with CMAF",
+      "reason": "MPEG-DASH is an ISO open standard that offers rich manifest features and codec flexibility, but lacks native playback support on Apple platforms (iOS and Safari), requiring custom Media Source Extensions (MSE) JavaScript wrappers that increase player bundle size and crash rates on mobile browsers. HLS is natively supported across all Apple devices, smart TVs, and major browsers when paired with Common Media Application Format (CMAF) fragmented MP4 (fMP4) chunks. Using HLS with CMAF allows a single media segment layout to serve both Apple and non-Apple clients, eliminating duplicate storage of video segments while guaranteeing native hardware-accelerated playback across 99% of global end-user devices."
+    },
+    {
+      "option_a": "Direct Cloud Object Storage Origins",
+      "option_b": "Multi-Region Origin CDN Caching with Origin Shielding",
+      "chosen": "Multi-Region Origin CDN Caching with Origin Shielding",
+      "reason": "Direct cloud object storage (e.g., S3) origins expose storage buckets directly to regional CDN edge misses, causing severe egress cost inflation ($0.08/GB) and risking bucket request throttling when millions of viewers request a new video release simultaneously. Placing an Origin Shielding proxy layer between regional CDNs and object storage collapses identical cache-miss requests across thousands of edge nodes into a single origin request, achieving a >99% CDN cache hit rate for popular titles. For a popular 2-hour 1080p stream (6 Mbps bitrate = 5.4 GB payload per user, calculated at 6 Mbps / 8 bits/byte * 7,200s) delivered to 1 million concurrent viewers, Origin Shielding reduces origin storage egress from 5,400 TB down to 5.4 GB, saving over $400,000 in origin egress fees per viral event."
+    }
+  ],
+  "interview_questions": [
+    "A major live sporting event or blockbuster movie release attracts 10 million concurrent viewers requesting chunk 1 (segment_1.m4s) at the exact same second. If edge CDN nodes experience a cache miss for the new file, explain how an Origin Shield architectural layer and request collapsing (Request Coalescing) prevent 50,000 edge servers from overwhelming the origin object storage cluster.",
+    "Traditional ABR algorithms switch bitrates based on estimated network throughput over the last 3 downloaded segments, causing unnecessary quality oscillation on transient network dips. Explain how Buffer-Based ABR algorithms (like BBA) use current video buffer occupancy (in seconds) to smooth bitrate switches, and calculate the minimum buffer threshold (in seconds) required before upgrading from 720p (3 Mbps) to 1080p (6 Mbps).",
+    "Standard VOD HLS uses 6-second segments, producing an end-to-end latency of 18–30 seconds (3 segment lengths + player buffer). Describe how Low-Latency HLS (LL-HLS) reduces latency to under 2 seconds using partial segments (chunked CMAF delivery via HTTP/2 Server Push or Byte-Range requests) and how player buffer management must adapt to prevent frequent playback stalls.",
+    "A video streaming service must deliver encrypted content across Apple devices (FairPlay), Android/Chrome (Widevine), and Windows/Edge (PlayReady) using a single set of media files. Explain how Common Encryption (CENC) with Common Media Application Format (CMAF) enables a single encoded file set to support multiple DRM license servers without duplicating storage.",
+    "Out of 100 million uploaded videos, the top 1% generate 90% of total streaming bandwidth, while 80% of videos receive zero views after their first month. Describe an automated storage lifecycle policy (hot S3 Standard to cold S3 Glacier Flexible Retrieval) and dynamic origin re-transcoding architecture that minimizes storage costs while bounding cold video playback startup time to under 3 seconds.",
+    "Fixed-bitrate ABR ladders encode simple talking-head commentary videos at the same 6 Mbps 1080p bitrate as high-action sports footage, wasting storage and CDN egress bandwidth. Describe how a Per-Title / Per-Scene Encoding pipeline uses VMAF (Video Multimethod Assessment Fusion) target scores to dynamically build an optimal ABR ladder, and calculate the bandwidth cost savings for a 1-hour talk show encoded at 2.5 Mbps instead of 6 Mbps across 5 million views.",
+    "During a peak live event with 20 million concurrent streams, CDN egress costs reach peak bandwidth limits (100 Tbps). Explain how WebRTC DataChannels can be used to construct a Client-to-Client Peer-to-Peer (P2P) mesh network for video segment delivery, and detail how the system handles peer churn, malicious peer payload tampering, and NAT traversal fallback to CDN origins.",
+    "A private pre-release movie screener is leaked online. Explain how A/B variant forensic watermarking (inserting subtle, imperceptible frame modifications into alternating video segments during ABR manifest generation) allows the platform to uniquely identify the leaked user account without requiring real-time per-user video re-encoding."
+  ]
+}

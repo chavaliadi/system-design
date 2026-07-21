@@ -1,0 +1,42 @@
+{
+  "id": "job-queue",
+  "name": "Job Queue",
+  "difficulty": "medium",
+  "mermaid_diagram": "graph TD\n    Producer([\"Producer App Service\"]) -->|\"1. Enqueue Job (with Idempotency Key)\"| Broker[\"Job Queue Broker\"]\n    Broker -->|\"2. Write Pending Job\"| PendingQueue[(\"Primary Queue Store - Redis / Disk\")]\n    Broker -->|\"3. Assign Lease & Visibility Timeout\"| InFlightStore[(\"In-Flight Ack Tracker\")]\n    InFlightStore -->|\"4. Dispatch / Poll Job\"| Worker1[\"Worker Node 1\"]\n    InFlightStore -->|\"4. Dispatch / Poll Job\"| Worker2[\"Worker Node 2\"]\n    Worker1 & Worker2 -->|\"5. Check / Set Idempotency Key\"| DedupStore[(\"Idempotency Store - Redis\")]\n    Worker1 & Worker2 -->|\"6. Execute Business Task\"| AppDB[(\"Primary Database\")]\n    Worker1 & Worker2 -->|\"7. Send Ack (Delete Job)\"| Broker\n    Broker -->|\"8. Route Exceeded Retries (Poison Pill)\"| DLQ[(\"Dead-Letter Queue Store\")]\n    AdminTools[\"DLQ Replayer / Admin Tools\"] -->|\"9. Inspect & Batch Re-inject\"| DLQ\n    AdminTools -->|\"10. Re-queue Fixed Jobs\"| Broker",
+  "tradeoffs": [
+    {
+      "option_a": "At-Most-Once Delivery (Ack on Receive)",
+      "option_b": "At-Least-Once Delivery with Consumer Idempotency",
+      "chosen": "At-Least-Once Delivery with Consumer Idempotency",
+      "reason": "At-most-once delivery acknowledges messages immediately upon worker pull before processing starts, eliminating duplicate executions but risking message loss if a worker process crashes mid-task. At-least-once delivery redelivers the message if the worker fails to send an acknowledgment within a 30-second visibility timeout, guaranteeing zero message loss at the cost of potential duplicate deliveries across network retries. Combining at-least-once delivery with an idempotent consumer design (storing 64-bit processed message_ids in Redis with a 7-day TTL) adds a sub-millisecond lookup overhead (typically 0.5–2ms per job) to guarantee effectively-exactly-once processing, making it the required architectural choice for mission-critical asynchronous tasks like payment processing."
+    },
+    {
+      "option_a": "In-Memory Broker (Redis Streams)",
+      "option_b": "Persistent Disk-Backed Queue (RabbitMQ / PostgreSQL)",
+      "chosen": "Persistent Disk-Backed Queue (RabbitMQ / PostgreSQL)",
+      "reason": "In-memory Redis queues deliver sub-millisecond delivery latency (<1ms) and high throughput (>100,000 ops/sec per node), but risk job loss if a Redis node crashes before an in-memory queue state is persisted to disk via RDB or AOF sync. A disk-backed queue using Write-Ahead Logging (WAL) or durable index structures guarantees durability across hardware restarts, absorbing heavy traffic spikes by writing messages safely to persistent storage. At 10,000 enqueued jobs per second with a 1 KB payload, a durable queue processes 10 MB/s of sequential disk write throughput—well within standard NVMe SSD write limits of 500+ MB/s—while adding a 2–5ms write latency penalty per enqueue call. This trade-off prioritizes absolute message durability over raw in-memory execution speed for background job pipelines where losing a single task degrades system correctness."
+    },
+    {
+      "option_a": "Fixed Interval Retries",
+      "option_b": "Exponential Backoff with Full Jitter",
+      "chosen": "Exponential Backoff with Full Jitter",
+      "reason": "Fixed-interval retries (e.g., retrying every 5 seconds) cause 'retry storms' when a downstream database or third-party API experiences an outage, as thousands of failed workers retry in synchronized waves that re-saturate the recovering service. Exponential backoff doubles the retry interval after each attempt, while Full Jitter picks a uniform random delay between 0 and the capped backoff upper bound. For 5,000 failing workers executing retry attempt #4 with a 1-second base delay (capped at t = 1s × 2^3 = 8s), Full Jitter spreads worker retries evenly across an 8-second window (averaging 625 req/sec instead of a 5,000 req/sec instantaneous spike), allowing downstream dependencies to recover smoothly. The trade-off is higher tail latency for jobs experiencing multiple failures (accumulating up to 31 seconds across 5 retries), which is acceptable for asynchronous background workloads."
+    },
+    {
+      "option_a": "Indefinite In-Queue Retries",
+      "option_b": "Dead-Letter Queue (DLQ) Isolation with Max Retry Bound",
+      "chosen": "Dead-Letter Queue (DLQ) Isolation with Max Retry Bound",
+      "reason": "Retrying failing jobs indefinitely inside the primary queue causes 'poison pill' messages—malformed payloads or unhandled schema mismatches—to continuously consume worker CPU and block healthy tasks in the queue pipeline. Setting a max retry bound (e.g., 5 attempts) and moving exhausted messages to an isolated Dead-Letter Queue (DLQ) quarantines poison payloads, preserving primary queue throughput and keeping overall job processing latency under 100ms for valid tasks. The trade-off is operational overhead: engineering teams must build dedicated monitoring, alert on DLQ depth, and implement manual or automated replay tools to re-inject fixed messages back into the primary queue after deploying hotfixes."
+    }
+  ],
+  "interview_questions": [
+    "A worker receives a background video encoding job estimated at 2 minutes, but the queue visibility timeout is set to 30 seconds. Describe how to implement a dynamic heartbeat lease extension mechanism, and explain how the system handles a worker that experiences a brief 5-second network pause while renewing its lease.",
+    "Two duplicate delivery attempts of the same payment_process job arrive concurrently at Worker Node A and Worker Node B due to a network re-transmit. Walk through the exact database transaction pattern (using SELECT ... FOR UPDATE or atomic status transitions) and idempotency key state machine required to prevent double-charging the customer.",
+    "A bug in consumer code causes 100,000 jobs to fail and get quarantined to a Dead-Letter Queue (DLQ). After deploying a hotfix, you trigger a batch replay from the DLQ back into the primary queue. If 1,000 of those jobs are corrupted poison messages that still fail, how do you prevent an infinite loop of DLQ to primary queue transfers while allowing valid jobs to drain successfully?",
+    "A worker node pulls a job from the queue, marks it as IN_PROGRESS, and begins executing an external HTTP request. Mid-execution, the worker process is abruptly killed by the host OS out-of-memory (OOM) killer. Trace the exact sequence of events in the job broker: how does the broker detect the crash, when does the visibility timeout expire, and how is the job safely reassigned to another worker without state corruption?",
+    "Downstream API rate limits cause 10,000 concurrent queue workers to fail their tasks simultaneously. Explain how exponential backoff combined with Full Jitter prevents a thundering herd retry storm when the downstream service recovers, and calculate the backoff delay range for retry attempt #4 with a 1-second base delay.",
+    "A multi-tenant job queue must guarantee strict FIFO execution order for tasks belonging to the same tenant_id, but tasks across different tenants must be processed in parallel across 50 worker nodes. Describe how partition-key sharded queues or database advisory locks enforce per-tenant sequential processing without allowing a single heavy tenant to block all other tenants.",
+    "During a rolling deployment, Kubernetes sends a SIGTERM signal to a worker node holding 10 active long-running jobs (each 15 seconds away from completion). Describe the graceful shutdown lifecycle of the worker process: how does it stop taking new messages, how long does it wait for active jobs to complete (terminationGracePeriodSeconds), and what happens if a job exceeds the shutdown grace window?",
+    "A status-monitoring service enqueues a generate_user_report job every time a user clicks a button. If a user clicks the button 20 times in 5 seconds, 20 identical jobs are enqueued. How do you implement a write-side queue deduplication mechanism (using Redis Sorted Sets or a unique pending key index) so that only 1 pending job exists in the queue at any time while preserving execution for subsequent post-completion clicks?"
+  ]
+}

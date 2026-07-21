@@ -10,7 +10,7 @@ An adaptive learning platform for practicing system design interviews. Users stu
 
 | # | Feature | Phase | Status | Critical Path? | Dependencies |
 |---|---------|-------|--------|----------------|--------------|
-| 1 | Topic JSON Content | Foundation | planned | Yes | None |
+| 1 | Topic JSON Content | Foundation | done | Yes | None |
 | 2 | Next.js & UI Scaffold | Foundation | planned | Yes | None |
 | 3 | Coding standards & tooling | Foundation | planned | No | 2 |
 | 4 | Data model | Foundation | planned | Yes | 2 |
@@ -28,7 +28,7 @@ An adaptive learning platform for practicing system design interviews. Users stu
 ### 1. Topic JSON Content
 Create and validate the JSON files for the 8 system design topics, including Mermaid diagram strings and trade-offs. This acts as the extensibility anchor; adding new topics is zero-code.
 **Done when:** All 8 JSON files are complete, valid, and their Mermaid diagrams render successfully.
-- [ ] Write and validate content files: `/develop topic-content`
+- [x] Write and validate content files: `/develop topic-content`
 
 ### 2. Next.js & UI Scaffold
 Scaffold the Next.js 15 App Router codebase with Tailwind CSS, shadcn/ui, and absolute import layouts.

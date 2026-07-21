@@ -1,0 +1,42 @@
+{
+  "id": "search-autocomplete",
+  "name": "Search Autocomplete",
+  "difficulty": "hard",
+  "mermaid_diagram": "graph TD\n    Client([\"Client Browser / Mobile App\"]) -->|\"1. Keystroke (100ms Debounce)\"| Gateway[\"API Gateway\"]\n    Gateway -->|\"2. Check Prefix Cache\"| AppCache[(\"Application Cache - Redis\")]\n    Gateway -->|\"3. Autocomplete Request\"| AutoSvc[\"Autocomplete Service\"]\n    AutoSvc -->|\"4. Query Hash Partition\"| TrieCluster[\"Trie Server Cluster\"]\n    AutoSvc -->|\"5. Fetch Trending Delta\"| DeltaStore[(\"Trending Delta Store - Redis ZSet\")]\n    AutoSvc -->|\"6. Merge & Rank Results\"| AutoSvc\n    Client -->|\"7. Search Submit Event\"| LogQueue[\"Log Streaming Queue - Kafka\"]\n    LogQueue -->|\"8. Stream Aggregation\"| StreamProc[\"Real-Time Analytics - Flink\"]\n    StreamProc -->|\"9. Update Delta Rankings\"| DeltaStore\n    LogQueue -->|\"10. Dump Raw Logs\"| DataLake[(\"Data Lake - HDFS / S3\")]\n    DataLake -->|\"11. Weekly Batch Index Build\"| MapReduce[\"Batch Processing - Spark\"]\n    MapReduce -->|\"12. Deploy Updated Trie Index\"| TrieCluster",
+  "tradeoffs": [
+    {
+      "option_a": "Dynamic Sorting at Query Time",
+      "option_b": "Pre-computed Top-K Suggestions at Each Node",
+      "chosen": "Pre-computed Top-K Suggestions at Each Node",
+      "reason": "Dynamic sorting at query time requires traversing all leaf nodes under a matching prefix subtree and sorting candidate terms by frequency: for a single-character prefix like 'a' with V = 1,000,000 subtree items, an O(V log V) sort executes over 20 million comparison operations, consuming 200–500ms of CPU time per keystroke. Storing a pre-computed array of the top K=10 most frequent 64-bit query IDs directly inside each Trie node reduces read complexity to O(k) for a prefix of length k, bounding lookup latency to under 2ms (traversing k <= 10 nodes and reading the 10-element array). The cost is a memory overhead penalty: storing 10 pre-computed 64-bit IDs per node across 100 million Trie nodes adds 8 GB of RAM (10 x 8 bytes x 100M nodes = 8 GB), which is a favorable trade-off to eliminate expensive query-path subtree traversals."
+    },
+    {
+      "option_a": "Prefix-Based Sharding (e.g., Server A holds 'a'-'c')",
+      "option_b": "Hash-Based Key Sharding (Hash(Prefix) % N)",
+      "chosen": "Hash-Based Key Sharding (Hash(Prefix) % N)",
+      "reason": "Prefix-based sharding maps terms to servers by initial character, which creates severe load imbalances because single-letter prefixes like 'a' or 'e' receive up to 100x more query traffic than 'z' or 'q'. Hash-based sharding computes Hash(prefix) % N to distribute prefix lookup requests uniformly across an N-node cluster, keeping server CPU utilization balanced within a 5% margin. The trade-off is that single-node range queries (such as scanning all prefixes starting with 'app') can no longer be executed on a single host and require scatter-gather queries across partitions, which is acceptable because autocomplete operations are single-prefix lookups rather than range scans."
+    },
+    {
+      "option_a": "Synchronous Live Trie Mutations",
+      "option_b": "Weekly Batch Trie Rebuild with Real-Time Delta Store",
+      "chosen": "Weekly Batch Trie Rebuild with Real-Time Delta Store",
+      "reason": "Mutating a distributed Trie synchronously on every user search query creates intense write lock contention across high-fanout prefix nodes, increasing write latency and risking pointer corruptions during high-concurrency traffic (100,000 queries/sec). An offline batch pipeline (using Spark/MapReduce) processes raw search logs weekly to build an immutable, highly compressed Trie index, while a real-time delta layer (Redis Sorted Sets) tracks breaking news trends over a rolling 1-hour window. The application server fetches the top 10 static Trie results and top 10 trending delta results, performing a 20-element min-heap merge in under 3ms at query time, accepting a brief 1-hour propagation delay for historical frequency counts in exchange for absolute write-path stability."
+    },
+    {
+      "option_a": "Fuzzy Matching (Levenshtein Distance d=1)",
+      "option_b": "Strict Exact Prefix Matching with Fallback Spellchecker",
+      "chosen": "Strict Exact Prefix Matching with Fallback Spellchecker",
+      "reason": "Supporting real-time fuzzy matching inside the primary Trie lookup path using naive unpruned branch exploration expands worst-case search complexity from O(k) to O(k * 26^d) for an alphabet of 26 characters. For a 5-character prefix (k=5) at edit distance d=1, naive exploration visits up to 130 branch paths, increasing average lookup latency from 2ms to over 45ms per keystroke. Restricting the primary autocomplete index to strict exact prefix matching guarantees a sub-5ms SLA across all keystrokes, while offloading typo correction to an isolated spellchecker service (or Levenshtein Automaton engine) that triggers only as a fallback when an exact prefix returns zero results."
+    }
+  ],
+  "interview_questions": [
+    "In a prefix-sharded Trie cluster (e.g. Server 1 holds prefixes 'a'–'c', Server 2 holds 'd'–'f'), single-letter prefixes like 'a' receive 100 times more query traffic than 'z'. Describe two distinct strategies to distribute lookup load for single-letter and two-letter hot prefixes across a 50-node cluster without duplicating the entire Trie dataset on every node.",
+    "Each Trie node stores a pre-computed array of the top 10 most frequent search terms for that prefix. When a new query (e.g., 'breaking news event') suddenly spikes to 100,000 searches per minute, describe the exact bottom-up propagation algorithm and lock-free data structure update needed to refresh the top 10 arrays along the prefix path without causing read latency spikes on active Trie lookups.",
+    "A user types 'iphne' (1 edit distance from 'iphone'). Traversing the entire Trie with a Levenshtein edit distance of d=1 increases worst-case search space from O(k) to O(k * |Alphabet|^d), where k is prefix length and |Alphabet|=26. Explain how to bound fuzzy search latency to under 15ms using Levenshtein Automata or N-gram index lookups, and specify under what traffic conditions fuzzy matching should be bypassed entirely.",
+    "Your autocomplete architecture uses a weekly offline MapReduce batch build to generate the primary Trie, and a real-time stream processing pipeline (Kafka + Redis Sorted Sets) to track breaking news trends. Describe the exact read-path algorithm used by the application service to merge the static Trie results with the real-time trending delta layer within a 10ms SLA, and detail how you prevent stale batch results from suppressing sudden trending queries.",
+    "A Trie containing 100 million unique search terms with top 10 pre-computed suggestion strings consumes 30 GB of raw memory when implemented with standard pointer-based nodes (unordered_map<char, Node*>). Describe how to compact this Trie using a Radix Tree (Patricia Trie) or Succinct Double-Array Trie (DAT) layout to reduce memory footprint by 70% while maintaining O(k) lookup latency.",
+    "An autocomplete input field triggers an HTTP request per keystroke. Explain how client-side debouncing (e.g., 100ms threshold), browser local storage caching, and CDN edge caching (Cloudflare KV / Anycast) interact. If a user types 'system design' at 50 words per minute, calculate how many backend autocomplete RPCs reach your application servers versus being served from edge or client caches.",
+    "A search engine wants to personalize autocomplete suggestions (e.g., prioritizing 'python tutorial' for a software developer vs 'python snake species' for a biologist) while maintaining a global top-10 cache. How do you design a high-throughput read path that combines pre-computed global Trie suggestions with a user-specific context vector in under 5ms without running expensive real-time ML scoring on every keystroke?",
+    "A botnet submits millions of queries containing hate speech or offensive terms to artificially inflate their search frequencies and force them into top 10 pre-computed Trie nodes. How do you design a real-time query ingestion filter and Trie node update pipeline to sanitize, flag, and suppress malicious terms before they get pre-computed into public Trie nodes?"
+  ]
+}
