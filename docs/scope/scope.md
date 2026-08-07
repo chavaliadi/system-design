@@ -13,7 +13,7 @@ An adaptive learning platform for practicing system design interviews. Users stu
 | 1 | Topic JSON Content | Foundation | done | Yes | None |
 | 2 | Next.js & UI Scaffold | Foundation | in-progress | Yes | None |
 | 3 | Coding standards & tooling | Foundation | planned | No | 2 |
-| 4 | Data model | Foundation | planned | Yes | 2 |
+| 4 | Data model | Foundation | in-progress | Yes | 2 |
 | 5 | Topic browser & detail views | Skeleton | planned | Yes | 1, 2, 4 |
 | 6 | Quiz generation & evaluation API | Slice 1 | planned | Yes | 4 |
 | 7 | Quiz interface & results | Slice 1 | planned | Yes | 5, 6 |
@@ -41,10 +41,16 @@ Configure ESLint, Prettier, TypeScript strict mode, and pre-commit checks.
 - [ ] Capture conventions and tooling setup: `/audit`
 - [ ] Configure lint, formatting, and pre-commit checks: `/develop tooling`
 
-### 4. Data model · needs a decision
+### 4. Data model
 Define Mongoose schemas for Topic, SM2State, and QuizSession to persist curriculum data and user history.
 **Done when:** The database schema supports spaced repetition state and structured quiz session analytics.
-- [ ] Design it (spec): `/architect data-model`
+- [x] Design it (spec): [0001](../specs/0001-data-model.md)
+- [ ] Build it: `/develop data-model`
+  - [x] Create Mongoose schemas & TS interfaces for Topic, SM2State, QuizSession (satisfies AC-1, AC-2, AC-3, AC-6)
+  - [ ] Implement scoreFromText dimension score adapter (satisfies AC-4)
+  - [ ] Update seed script for idempotent Topic re-creation and SM2State upserts (satisfies AC-5)
+- [ ] Verify it: `/check verify data-model`
+- [ ] Test it: `/test data-model`
 
 ---
 
