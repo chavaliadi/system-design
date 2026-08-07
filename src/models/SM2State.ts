@@ -8,9 +8,9 @@ export interface ISM2State {
   repetitions: number
   nextReview: Date
   masteryScore: number
-  avg_correctness: number
-  avg_tradeoff_reasoning: number
-  avg_scalability_awareness: number
+  avgCorrectness: number
+  avgTradeoffReasoning: number
+  avgScalabilityAwareness: number
   updatedAt: Date
 }
 
@@ -28,9 +28,9 @@ const SM2StateSchema = new Schema<ISM2State>(
     repetitions: { type: Number, required: true, default: 0, min: 0 },
     nextReview: { type: Date, required: true, default: Date.now },
     masteryScore: { type: Number, required: true, default: 0, min: 0, max: 5 },
-    avg_correctness: { type: Number, required: true, default: 0, min: 0, max: 5 },
-    avg_tradeoff_reasoning: { type: Number, required: true, default: 0, min: 0, max: 5 },
-    avg_scalability_awareness: { type: Number, required: true, default: 0, min: 0, max: 5 },
+    avgCorrectness: { type: Number, required: true, default: 0, min: 0, max: 5 },
+    avgTradeoffReasoning: { type: Number, required: true, default: 0, min: 0, max: 5 },
+    avgScalabilityAwareness: { type: Number, required: true, default: 0, min: 0, max: 5 },
     updatedAt: { type: Date, required: true, default: Date.now }
   },
   {

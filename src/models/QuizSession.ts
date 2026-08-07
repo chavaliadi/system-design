@@ -22,7 +22,6 @@ const QuizSessionSchema = new Schema<IQuizSession>(
     topicId: {
       type: String,
       required: true,
-      index: true,
       ref: 'Topic'
     },
     question: { type: String, required: true },

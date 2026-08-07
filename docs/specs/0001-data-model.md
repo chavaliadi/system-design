@@ -22,7 +22,7 @@ Without a well structured data model, curriculum re-seeding risks wiping out use
 
 **Acceptance criteria**:
 - **AC-1**: Topic model uses a human readable string `_id` (matching `id` in `content/*.json`), storing name, difficulty enum ("easy", "medium", "hard"), mermaid diagram string, tradeoffs array (with `option_a`, `option_b`, `chosen`, `reason`), and interview questions array.
-- **AC-2**: SM2State model maintains a unique index on `topicId` referencing Topic `_id`, storing SM-2 fields (`interval`, `easeFactor` >= 1.3, `repetitions`, `nextReview`), overall `masteryScore`, and per dimension rolling averages (`avg_correctness`, `avg_tradeoff_reasoning`, `avg_scalability_awareness`).
+- **AC-2**: SM2State model maintains a unique index on `topicId` referencing Topic `_id`, storing SM-2 fields (`interval`, `easeFactor` >= 1.3, `repetitions`, `nextReview`), overall `masteryScore`, and per dimension rolling averages (`avgCorrectness`, `avgTradeoffReasoning`, `avgScalabilityAwareness`).
 - **AC-3**: QuizSession model stores append only quiz attempts with `topicId`, `question`, `answer`, `qualityScore` (integer 1 to 5), numeric dimension scores (`correctnessScore`, `tradeoffScore`, `scalabilityScore`), structured text feedback, `missed_points` string array, and `createdAt` timestamp. Enforces a compound index on `{ topicId: 1, createdAt: -1 }`.
 - **AC-4**: A `scoreFromText` adapter function reliably extracts numeric dimension scores (1 to 5) directly from QuizSession fields, with a regex fallback parser for legacy text entries, enabling direct rolling average calculations in SM2State without extra Groq API calls.
 - **AC-5**: The `seed.ts` script deletes and recreates Topic documents on every run, but upserts SM2State documents using `findOneAndUpdate` with `$setOnInsert` and `upsert: true` to preserve user learning progress.
@@ -104,9 +104,9 @@ SM2State
   repetitions: Number (default 0, min 0)
   nextReview: Date (default Date.now)
   masteryScore: Number (default 0, min 0, max 5)
-  avg_correctness: Number (default 0, min 0, max 5)
-  avg_tradeoff_reasoning: Number (default 0, min 0, max 5)
-  avg_scalability_awareness: Number (default 0, min 0, max 5)
+  avgCorrectness: Number (default 0, min 0, max 5)
+  avgTradeoffReasoning: Number (default 0, min 0, max 5)
+  avgScalabilityAwareness: Number (default 0, min 0, max 5)
   updatedAt: Date (default Date.now)
 
 QuizSession
