@@ -50,7 +50,7 @@ Define Mongoose schemas for Topic, SM2State, and QuizSession to persist curricul
   - [ ] Implement scoreFromText dimension score adapter (satisfies AC-4)
   - [ ] Update seed script for idempotent Topic re-creation and SM2State upserts (satisfies AC-5)
 - [ ] Verify it: `/check verify data-model`
-- [ ] Test it: `/test data-model`
+- [x] Test it: `/test data-model`
 
 ---
 

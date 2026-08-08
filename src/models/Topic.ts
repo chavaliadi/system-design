@@ -36,7 +36,14 @@ const TopicSchema = new Schema<ITopic>(
       enum: ['easy', 'medium', 'hard']
     },
     mermaid_diagram: { type: String, required: true },
-    tradeoffs: { type: [TradeoffSchema], required: true },
+    tradeoffs: {
+      type: [TradeoffSchema],
+      required: true,
+      validate: {
+        validator: (arr: ITradeoff[]) => Array.isArray(arr) && arr.length > 0,
+        message: 'tradeoffs must be a non-empty array'
+      }
+    },
     interview_questions: { type: [String], required: true, default: [] }
   },
   {
