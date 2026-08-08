@@ -65,15 +65,15 @@ describe('SM2State Model (AC-2)', () => {
   it('enforces uniqueness on topicId', async () => {
     await SM2State.create({ topicId: 'topic-unique' })
 
-    let err: any = null
+    let err: (Error & { code?: number }) | null = null
     try {
       await SM2State.create({ topicId: 'topic-unique' })
     } catch (error) {
-      err = error
+      err = error as Error & { code?: number }
     }
 
     expect(err).toBeDefined()
-    expect(err.code).toBe(11000)
+    expect(err?.code).toBe(11000)
   })
 
   it('confirms defaults apply correctly on insert', async () => {

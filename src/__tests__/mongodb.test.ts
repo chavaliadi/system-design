@@ -7,7 +7,7 @@ describe('MongoDB Connection Singleton (mongodb.ts)', () => {
 
   beforeEach(() => {
     vi.resetModules()
-    delete (global as any).mongooseCache
+    delete global.mongooseCache
   })
 
   afterEach(async () => {

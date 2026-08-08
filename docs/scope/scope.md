@@ -14,7 +14,7 @@ An adaptive learning platform for practicing system design interviews. Users stu
 | 2 | Next.js & UI Scaffold | Foundation | in-progress | Yes | None |
 | 3 | Coding standards & tooling | Foundation | planned | No | 2 |
 | 4 | Data model | Foundation | in-progress | Yes | 2 |
-| 5 | Topic browser & detail views | Skeleton | planned | Yes | 1, 2, 4 |
+| 5 | Topic browser & detail views | Skeleton | in-progress | Yes | 1, 2, 4 |
 | 6 | Quiz generation & evaluation API | Slice 1 | planned | Yes | 4 |
 | 7 | Quiz interface & results | Slice 1 | planned | Yes | 5, 6 |
 | 8 | SM-2 spaced repetition | Slice 2 | planned | No | 4, 6 |
@@ -56,10 +56,18 @@ Define Mongoose schemas for Topic, SM2State, and QuizSession to persist curricul
 
 ## Skeleton
 
-### 5. Topic browser & detail views · needs a decision
+### 5. Topic browser & detail views
 Build the landing page card view and the detail page rendering Mermaid diagrams and trade-offs.
 **Done when:** Users can browse topics with mastery indicators, click a topic, see the rendering diagram, and read architectural trade-offs.
-- [ ] Design it (spec): `/architect topic-views`
+- [x] Design it (spec): [0002](../specs/0002-topic-views.md)
+- [ ] Build it: `/develop topic-views`
+  - [x] Data access abstraction getTopics in src/lib/getTopics.ts (satisfies AC-1, AC-6)
+  - [x] Topic browser grid and TopicCard in src/app/page.tsx (satisfies AC-2)
+  - [x] Mermaid diagram renderer in src/components/MermaidDiagram.tsx (satisfies AC-4)
+  - [x] Side-by-side trade-off comparison panels in src/components/TradeoffPanel.tsx (satisfies AC-5)
+  - [x] Topic detail page route in src/app/topic/[id]/page.tsx (satisfies AC-3, AC-4, AC-5)
+- [ ] Verify it: `/check verify topic-views`
+- [ ] Test it: `/test topic-views`
 
 ---
 
