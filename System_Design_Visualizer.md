@@ -417,8 +417,8 @@ QuizSession.create({
 Compute rolling mastery (last 5 sessions):
   recent = QuizSession.find({ topicId }).sort(-createdAt).limit(5)
   masteryScore = avg(recent.map(s => s.qualityScore))
-  avg_correctness = avg(recent.map(s => scoreFromText(s.correctness)))
-  avg_scalability_awareness = avg(recent.map(s => scoreFromText(s.scalability_awareness)))
+  avg_correctness = avg(recent.map(s => s.correctnessScore))
+  avg_scalability_awareness = avg(recent.map(s => s.scalabilityScore))
     │
     ▼
 SM-2 update:

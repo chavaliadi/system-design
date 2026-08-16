@@ -24,7 +24,7 @@ Without a well structured data model, curriculum re-seeding risks wiping out use
 - **AC-1**: Topic model uses a human readable string `_id` (matching `id` in `content/*.json`), storing name, difficulty enum ("easy", "medium", "hard"), mermaid diagram string, tradeoffs array (with `option_a`, `option_b`, `chosen`, `reason`), and interview questions array.
 - **AC-2**: SM2State model maintains a unique index on `topicId` referencing Topic `_id`, storing SM-2 fields (`interval`, `easeFactor` >= 1.3, `repetitions`, `nextReview`), overall `masteryScore`, and per dimension rolling averages (`avgCorrectness`, `avgTradeoffReasoning`, `avgScalabilityAwareness`).
 - **AC-3**: QuizSession model stores append only quiz attempts with `topicId`, `question`, `answer`, `qualityScore` (integer 1 to 5), numeric dimension scores (`correctnessScore`, `tradeoffScore`, `scalabilityScore`), structured text feedback, `missed_points` string array, and `createdAt` timestamp. Enforces a compound index on `{ topicId: 1, createdAt: -1 }`.
-- **AC-4**: A `scoreFromText` adapter function reliably extracts numeric dimension scores (1 to 5) directly from QuizSession fields, with a regex fallback parser for legacy text entries, enabling direct rolling average calculations in SM2State without extra Groq API calls.
+- **AC-4**: SM2State per-dimension rolling averages (`avgCorrectness`, `avgTradeoffReasoning`, `avgScalabilityAwareness`) read numeric score fields (`correctnessScore`, `tradeoffScore`, `scalabilityScore`) directly from QuizSession documents, enabling deterministic rolling average calculations without extra Groq API calls or text parsing.
 - **AC-5**: The `seed.ts` script deletes and recreates Topic documents on every run, but upserts SM2State documents using `findOneAndUpdate` with `$setOnInsert` and `upsert: true` to preserve user learning progress.
 - **AC-6**: Strict TypeScript interfaces (`ITopic`, `ISM2State`, `IQuizSession`) are defined and exported matching project naming conventions (`PascalCase` models and types, `camelCase` fields).
 
@@ -160,14 +160,14 @@ Where `easeFactor` is clamped to a minimum of 1.3 and `nextReview` is calculated
 **Critical test scenarios**:
 - Happy path: Running `seed.ts` populates Topic collection with 8 topics using string `_id` and initializes SM2State documents without overwriting existing learning metrics, verifies **AC-1**, **AC-2**, **AC-5**.
 - Failure case: Attempting to insert a QuizSession with `qualityScore` set to 6 fails Mongoose schema validation, verifies **AC-3**.
-- Adapter verification: `scoreFromText` successfully reads integer score fields or parses text prefixes with fallback to `qualityScore`, verifies **AC-4**.
+- Dimension scores verification: QuizSession numeric dimension score fields (`correctnessScore`, `tradeoffScore`, `scalabilityScore`) enforce integer validation (1 to 5) directly at schema level for SM2State rolling average calculations, verifies **AC-4**.
 
 ## Build plan
 
 1. Create `src/models/Topic.ts` declaring schema validation (string `_id`, difficulty enum, tradeoffs array) and TypeScript types (`ITopic`), satisfies **AC-1**, **AC-6**.
 2. Create `src/models/SM2State.ts` declaring core SM-2 fields, unique `topicId` index, minimum easeFactor validator, rolling average fields, and TypeScript types (`ISM2State`), satisfies **AC-2**, **AC-6**.
 3. Create `src/models/QuizSession.ts` declaring evaluation scores (1 to 5 validation), text fields, compound index `{ topicId: 1, createdAt: -1 }`, and TypeScript types (`IQuizSession`), satisfies **AC-3**, **AC-6**.
-4. Implement `scoreFromText` adapter in `src/lib/sm2.ts` to extract numeric dimension scores with regex fallback, satisfies **AC-4**.
+4. Implement SM-2 algorithm helper `sm2Update` in `src/lib/sm2.ts`, satisfies **AC-2**, **AC-4**.
 5. Update `src/scripts/seed.ts` script to delete/recreate Topic collection while performing non destructive `$setOnInsert` upserts on SM2State collection, satisfies **AC-5**.
 
 ## Consequences

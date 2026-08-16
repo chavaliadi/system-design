@@ -47,7 +47,7 @@ Define Mongoose schemas for Topic, SM2State, and QuizSession to persist curricul
 - [x] Design it (spec): [0001](../specs/0001-data-model.md)
 - [ ] Build it: `/develop data-model`
   - [x] Create Mongoose schemas & TS interfaces for Topic, SM2State, QuizSession (satisfies AC-1, AC-2, AC-3, AC-6)
-  - [ ] Implement scoreFromText dimension score adapter (satisfies AC-4)
+  - [x] Verify direct numeric score fields for SM2State rolling averages (satisfies AC-4)
   - [ ] Update seed script for idempotent Topic re-creation and SM2State upserts (satisfies AC-5)
 - [ ] Verify it: `/check verify data-model`
 - [x] Test it: `/test data-model`
