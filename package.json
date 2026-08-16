@@ -8,7 +8,17 @@
     "start": "next start",
     "lint": "next lint",
     "seed": "tsx src/scripts/seed.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,css,mjs}": [
+      "prettier --write"
+    ]
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -31,7 +41,10 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
     "mongodb-memory-server": "^11.2.0",
+    "prettier": "^3.9.6",
     "tailwindcss": "^4",
     "tsx": "^4.19.2",
     "typescript": "^5",
